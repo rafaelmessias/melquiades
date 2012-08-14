@@ -32,6 +32,10 @@ projects_json = URI.parse("#{base_url}/projects.json").read
 File.open("#{projects_dir}/00_list.json", 'w') {|f| f.write(projects_json) }
 puts "ok"
 
+# FOR DEBUGGING PURPOSES; PLEASE DON'T COMMIT
+DEBUG_MAX_PROJECTS = 10
+debug_project_count = 0
+
 JSON(projects_json).each do |project|
   puts "Current project: '#{project['name']}'"
   project_path = projects_dir + '/' + project['name']
@@ -53,10 +57,14 @@ JSON(projects_json).each do |project|
   File.open(project_path + '/dumps.json', 'w') {|f| f.write(dumps_json)}
   JSON(dumps_json).each do |dump|
     filename = File.basename(dump['dump_url'])
-    puts '  ' + filename
-    File.open(project_path + '/' + filename, 'w') do |f|      
-      f.write(URI.parse(dump['dump_url']).read)
-    end    
+    if File.exists? project_path + '/' + filename
+      puts "  Already exists: #{filename}"
+    else
+      puts "  #{filename}"
+      File.open(project_path + '/' + filename, 'w') do |f|      
+        f.write(URI.parse(dump['dump_url']).read)
+      end    
+    end
   end
   puts "ok"
 
@@ -66,5 +74,37 @@ JSON(projects_json).each do |project|
   File.open(project_path + '/resources.json', 'w') {|f| f.write(resources_json)}
   puts "ok"
 
-  break
+  puts "Trying to get the code..."
+  JSON(resources_json).each do |resource|
+    if resource['type'] == 'svn'
+      svn_path = project_path + '/svn'
+      if File.directory? svn_path
+        puts "  SVN already checked out"
+      else
+        svn_url = resource['url']
+        # When there's a trunk, download only that
+        `svn list #{svn_url}`.split("\n").each do |line|
+          if line.chomp.strip == 'trunk/'
+            svn_url = svn_url + '/trunk'
+            break
+          end
+        end
+        puts "  Checking out SVN: #{svn_url}"
+        `svn checkout #{svn_url} #{svn_path}`
+      end
+    end
+  end
+  puts "ok"
+
+  print "Running 'analizo' (if applicable)... "
+  if File.directory? project_path + '/svn'
+    `analizo metrics --output #{project_path}/analizo.out #{project_path}/svn`
+  end
+  puts "ok"
+
+  # FOR DEBUGGING PURPOSES; PLEASE DON'T COMMIT
+  debug_project_count = debug_project_count + 1
+  if debug_project_count == DEBUG_MAX_PROJECTS
+    break
+  end
 end
