@@ -21,6 +21,7 @@ require 'open-uri'
 
 DEBUG_SKIP_GIT_UPDATE = false
 DEBUG_SKIP_SVN_UPDATE = true
+DEBUG_SKIP_JSON_UPDATE = true
 
 base_url = 'http://melquiades.flossmetrics.org'
 
@@ -29,11 +30,6 @@ File.open('blacklist').each_line do |line|
   blacklist << line.chomp
 end
 
-#start = ""
-#File.open('start').each_line do |line|
-#  start = line.chomp
-#end
-
 projects_dir = "#{Dir.pwd}/projects"
 begin
   Dir.mkdir(projects_dir)
@@ -41,34 +37,28 @@ rescue
   puts "Warning: '#{projects_dir}' already exists."
 end
 
-print "Getting project list... "
-begin
-  projects_json = URI.parse("#{base_url}/projects.json").read
-#  File.open("#{projects_dir}/00_list.json", 'w') {|f| f.write(projects_json) }
-  puts "ok"
-rescue Exception => e
-  puts "Not ok!"
-  puts e.message  
-  puts e.backtrace.inspect 	
+if File.exists? "#{projects_dir}/00_list.json"
+  projects_json = File.open("#{projects_dir}/00_list.json").read
+end
+if DEBUG_SKIP_JSON_UPDATE == false
+  print "Getting project list... "
+  begin
+    projects_json = URI.parse("#{base_url}/projects.json").read
+    File.open("#{projects_dir}/00_list.json", 'w') { |f| f.write(projects_json) }
+    puts "ok"
+  rescue Exception => e
+    puts "Not ok!"
+    puts e.message  
+  end
 end
 
-DEBUG_MAX_PROJECT = 100000
-#started = false
+DEBUG_MAX_PROJECT = 1
+proj_count = 0
 JSON(projects_json).each do |project|
-  DEBUG_MAX_PROJECT = DEBUG_MAX_PROJECT - 1
-  break if DEBUG_MAX_PROJECT < 0
+  proj_count = proj_count + 1
+  break if proj_count > DEBUG_MAX_PROJECT
 
-  #puts "Current project: '#{project['name']}'"
   puts "[#{project['name']}]"
-  
-#  if !started 
-#    if !start.empty? and !(start == project['name'])
-#      puts "Not the starting project!"
-#      next
-#    else
-#      started = true
-#    end
-#  end
 
   if blacklist.include? project['name']
     puts "Blacklisted!"
@@ -81,49 +71,51 @@ JSON(projects_json).each do |project|
   rescue
     puts "Warning: '#{project_path}' already exists."
   end
+ 
+  if DEBUG_SKIP_JSON_UPDATE == false
+    print "Getting info (.json)... "
+    begin
+      info_url = base_url + project['url'] + '.json'
+      info_json = URI.parse(info_url).read
+      File.open(project_path + '/info.json', 'w') {|f| f.write(info_json)}
+      puts "ok"
+    rescue Exception => e
+      puts "Not ok!"
+      puts e.message  
+      puts e.backtrace.inspect 	
+    end
 
-#  print "Getting info (.json)... "
-#  begin
-#    info_url = base_url + project['url'] + '.json'
-#    info_json = URI.parse(info_url).read
-#    File.open(project_path + '/info.json', 'w') {|f| f.write(info_json)}
-#    puts "ok"
-#  rescue Exception => e
-#    puts "Not ok!"
-#    puts e.message  
-#    puts e.backtrace.inspect 	
-#  end
+    puts "Getting dumps (.json)..."
+    begin
+      dumps_url = base_url + project['url'] + '/dumps.json'
+      dumps_json = URI.parse(dumps_url).read
+      File.open(project_path + '/dumps.json', 'w') {|f| f.write(dumps_json)}
+      JSON(dumps_json).each do |dump|
+        filename = File.basename(dump['dump_url'])
+        puts '  ' + filename
+        File.open(project_path + '/' + filename, 'w') do |f|      
+          f.write(URI.parse(dump['dump_url']).read)
+        end    
+      end
+      puts "ok"
+    rescue Exception => e
+      puts "Not ok!"
+      puts e.message  
+      puts e.backtrace.inspect 	
+    end
 
-#  puts "Getting dumps (.json)..."
-#  begin
-#    dumps_url = base_url + project['url'] + '/dumps.json'
-#    dumps_json = URI.parse(dumps_url).read
-#    File.open(project_path + '/dumps.json', 'w') {|f| f.write(dumps_json)}
-#    JSON(dumps_json).each do |dump|
-#      filename = File.basename(dump['dump_url'])
-#      puts '  ' + filename
-#      File.open(project_path + '/' + filename, 'w') do |f|      
-#        f.write(URI.parse(dump['dump_url']).read)
-#      end    
-#    end
-#    puts "ok"
-#  rescue Exception => e
-#    puts "Not ok!"
-#    puts e.message  
-#    puts e.backtrace.inspect 	
-#  end
-
-#  print "Getting resources (.json)... "
-#  begin
-#    resources_url = base_url + project['url'] + '/resources.json'
-#    resources_json = URI.parse(resources_url).read
-#    File.open(project_path + '/resources.json', 'w') {|f| f.write(resources_json)}
-#    puts "ok"
-#  rescue Exception => e
-#    puts "Not ok!"
-#    puts e.message  
-#    puts e.backtrace.inspect 	
-#  end
+    print "Getting resources (.json)... "
+    begin
+      resources_url = base_url + project['url'] + '/resources.json'
+      resources_json = URI.parse(resources_url).read
+      File.open(project_path + '/resources.json', 'w') {|f| f.write(resources_json)}
+      puts "ok"
+    rescue Exception => e
+      puts "Not ok!"
+      puts e.message  
+      puts e.backtrace.inspect 	
+    end
+  end
 
   puts "Checking out code..."
   begin
@@ -146,10 +138,10 @@ JSON(projects_json).each do |project|
           next if DEBUG_SKIP_GIT_UPDATE
           git_path = git_dirs.split("\n").first
           git_cmd = "cd #{git_path} && git fetch origin && git pull origin master"
-          puts "  GIT Fetch/Pull"
+          puts "  GIT Fetch/Pull: #{git_url}"
         else
           git_cmd = "git clone #{git_url} #{git_path}"
-          puts "  GIT clone: #{git_url}"
+          puts "  GIT Clone: #{git_url}"
         end
         `#{git_cmd}`
       end
@@ -164,7 +156,7 @@ JSON(projects_json).each do |project|
           svn_path = svn_dirs.split("\n")[0]
 #          svn_cmd = "cd #{svn_path} && svn cleanup && svn update"
           svn_cmd = "cd #{svn_path} && svn update"
-          puts "  SVN Update"
+          puts "  SVN Update: #{svn_url}"
         else
           `svn list #{svn_url}`.each_line do |line|
             if line.downcase.chomp == 'trunk/'
