@@ -20,7 +20,7 @@ require 'json'
 require 'open-uri'
 
 DEBUG_SKIP_GIT_UPDATE = false
-DEBUG_SKIP_SVN_UPDATE = true
+DEBUG_SKIP_SVN_UPDATE = false
 DEBUG_SKIP_JSON_UPDATE = true
 
 base_url = 'http://melquiades.flossmetrics.org'
@@ -45,7 +45,7 @@ if DEBUG_SKIP_JSON_UPDATE == false
   begin
     projects_json = URI.parse("#{base_url}/projects.json").read
     File.open("#{projects_dir}/00_list.json", 'w') { |f| f.write(projects_json) }
-    puts "ok"
+    puts "OK"
   rescue Exception => e
     puts "Not ok!"
     puts e.message  
@@ -71,14 +71,14 @@ JSON(projects_json).each do |project|
   rescue
     puts "Warning: '#{project_path}' already exists."
   end
- 
+
   if DEBUG_SKIP_JSON_UPDATE == false
     print "Getting info (.json)... "
     begin
       info_url = base_url + project['url'] + '.json'
       info_json = URI.parse(info_url).read
       File.open(project_path + '/info.json', 'w') {|f| f.write(info_json)}
-      puts "ok"
+      puts "OK"
     rescue Exception => e
       puts "Not ok!"
       puts e.message  
@@ -97,7 +97,7 @@ JSON(projects_json).each do |project|
           f.write(URI.parse(dump['dump_url']).read)
         end    
       end
-      puts "ok"
+      puts "OK"
     rescue Exception => e
       puts "Not ok!"
       puts e.message  
@@ -109,7 +109,7 @@ JSON(projects_json).each do |project|
       resources_url = base_url + project['url'] + '/resources.json'
       resources_json = URI.parse(resources_url).read
       File.open(project_path + '/resources.json', 'w') {|f| f.write(resources_json)}
-      puts "ok"
+      puts "OK"
     rescue Exception => e
       puts "Not ok!"
       puts e.message  
@@ -117,78 +117,89 @@ JSON(projects_json).each do |project|
     end
   end
 
+  print "Checking available SCM's..."
+  File.open(project_path + '/resources.json', 'r') do |f|
+    resources_json = JSON(f.read)
+  end
+  scm = nil
+  resources_json.each do |resource|
+    if resource['name'] == 'SCM Repository'
+      if scm.nil? or scm['type'] == 'cvs'
+        scm = resource
+      elsif scm['type'] == 'svn' and resource['type'] == 'git'
+        scm = resource
+      end
+    end
+  end
+  puts " Priority: #{scm['type']}"
+
   puts "Checking out code..."
   begin
-    resources_json = ''
-    File.open(project_path + '/resources.json', 'r') do |f|
-      resources_json = JSON(f.read)
-    end
-    resources_json.each do |resource|
-      if resource['type'] == 'git'
-        git_path = project_path + '/git'
-        git_url = resource['url']
-		# There's a problem with Sourceforge git url's
-		if git_url.include? 'sourceforge'
-			name = git_url.split('/').last
-			git_url = "#{git_url}/#{name}"
-		end			
-        # Check if it was already downloaded; if yes, just update
-        git_dirs = `ls -d #{git_path}`
-        if !git_dirs.empty?
-          next if DEBUG_SKIP_GIT_UPDATE
-          git_path = git_dirs.split("\n").first
-          git_cmd = "cd #{git_path} && git fetch origin && git pull origin master"
-          puts "  GIT Fetch/Pull: #{git_url}"
-        else
-          git_cmd = "git clone #{git_url} #{git_path}"
-          puts "  GIT Clone: #{git_url}"
-        end
-        `#{git_cmd}`
+    if scm['type'] == 'git'
+      git_path = project_path + '/git'
+      git_url = scm['url']
+      # There's a problem with Sourceforge git url's
+      if git_url.include? 'sourceforge'
+        name = git_url.split('/').last
+        git_url = "#{git_url}/#{name}"
+      end			
+      # Check if it was already downloaded; if yes, just update
+      git_dirs = `ls -d #{git_path} 2>/dev/null`
+      if !git_dirs.empty?
+        next if DEBUG_SKIP_GIT_UPDATE
+        git_path = git_dirs.split("\n").first
+        git_cmd = "cd #{git_path} && git fetch origin && git pull origin master"
+        puts "  GIT Fetch/Pull: #{git_url}"
+      else
+        git_cmd = "git clone #{git_url} #{git_path}"
+        puts "  GIT Clone: #{git_url}"
       end
-
-      if resource['type'] == 'svn'
-        svn_url = resource['url']
-        svn_path = project_path + '/svn'
-        # Check if was already downloaded; if so, just update
-        svn_dirs = `ls -d #{svn_path}*`
-        if !svn_dirs.empty?
-          next if DEBUG_SKIP_SVN_UPDATE
-          svn_path = svn_dirs.split("\n")[0]
-#          svn_cmd = "cd #{svn_path} && svn cleanup && svn update"
-          svn_cmd = "cd #{svn_path} && svn update"
-          puts "  SVN Update: #{svn_url}"
-        else
-          `svn list #{svn_url}`.each_line do |line|
-            if line.downcase.chomp == 'trunk/'
-              svn_url = svn_url + '/trunk'
-              svn_path = svn_path + '_trunk'
-            end
-          end
-#          svn_path = svn_path + '_' + Time.now.strftime("%d-%m-%y") 
-          begin
-            Dir.mkdir(svn_path)
-          rescue
-            puts "  Warning: #{svn_path} already exists."
-          end
-          svn_cmd = "svn checkout #{svn_url} #{svn_path}"
-          puts "  SVN Checkout: #{svn_url}"
-        end
-        `#{svn_cmd}` 
-      end        
-#      if resource['type'] == 'cvs'
-#        cvs_url = resource['url']
-#        cvs_url.gsub!('anonymous', 'anonymous:')
-#        puts `cvs -d #{cvs_url} login` 
-#        if $? == 0
-#          modules = `cvs -d #{cvs_url} checkout -c`.split
-#          if !modules.empty?
-#            
-#            exit
-#          end
-#        end
-#      end
+      `#{git_cmd}`
     end
-    puts "ok"
+
+    if scm['type'] == 'svn'
+      svn_url = scm['url']
+      svn_path = project_path + '/svn'
+      # Check if was already downloaded; if so, just update
+      svn_dirs = `ls -d #{svn_path} 2>/dev/null`
+      if !svn_dirs.empty?
+        next if DEBUG_SKIP_SVN_UPDATE
+        svn_path = svn_dirs.split("\n")[0]
+        #          svn_cmd = "cd #{svn_path} && svn cleanup && svn update"
+        svn_cmd = "cd #{svn_path} && svn update"
+        puts "  SVN Update: #{svn_url}"
+      else
+        `svn list #{svn_url}`.each_line do |line|
+          if line.downcase.chomp == 'trunk/'
+            svn_url = svn_url + '/trunk'
+            svn_path = svn_path + '_trunk'
+          end
+        end
+        #          svn_path = svn_path + '_' + Time.now.strftime("%d-%m-%y") 
+        begin
+          Dir.mkdir(svn_path)
+        rescue
+          puts "  Warning: #{svn_path} already exists."
+        end
+        svn_cmd = "svn checkout #{svn_url} #{svn_path}"
+        puts "  SVN Checkout: #{svn_url}"
+      end
+      `#{svn_cmd}` 
+    end        
+
+    #      if resource['type'] == 'cvs'
+    #        cvs_url = resource['url']
+    #        cvs_url.gsub!('anonymous', 'anonymous:')
+    #        puts `cvs -d #{cvs_url} login` 
+    #        if $? == 0
+    #          modules = `cvs -d #{cvs_url} checkout -c`.split
+    #          if !modules.empty?
+    #            
+    #            exit
+    #          end
+    #        end
+    #      end
+    puts "OK"
   rescue Exception => e
     puts "Not ok!"
     puts e.message  
@@ -196,5 +207,5 @@ JSON(projects_json).each do |project|
     exit
   end
 
-#  break
+  #  break
 end
