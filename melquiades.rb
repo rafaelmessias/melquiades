@@ -165,7 +165,6 @@ JSON(projects_json).each do |project|
       if !svn_dirs.empty?
         next if DEBUG_SKIP_SVN_UPDATE
         svn_path = svn_dirs.split("\n")[0]
-        #          svn_cmd = "cd #{svn_path} && svn cleanup && svn update"
         svn_cmd = "cd #{svn_path} && svn update"
         puts "  SVN Update: #{svn_url}"
       else
@@ -175,7 +174,6 @@ JSON(projects_json).each do |project|
             svn_path = svn_path + '_trunk'
           end
         end
-        #          svn_path = svn_path + '_' + Time.now.strftime("%d-%m-%y") 
         begin
           Dir.mkdir(svn_path)
         rescue
